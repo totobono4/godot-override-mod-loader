@@ -1,8 +1,8 @@
 extends Node
 
-const MOD_LOADER_LOG := "totobono4_mod_loader:Log: "
-const MOD_LOADER_WARN := "totobono4_mod_loader:Warning: "
-const MOD_LOADER_ERR := "totobono4_mod_loader:Error: "
+const MOD_LOADER_LOG := "override_mod_loader:Log: "
+const MOD_LOADER_WARN := "override_mod_loader:Warning: "
+const MOD_LOADER_ERR := "override_mod_loader:Error: "
 
 const MODS_PATH := "override_mods"
 const UNPACKED_MODS_PATH := "res://mods-unpacked"
@@ -22,18 +22,6 @@ const MANIFEST_DEPENDENCIES_KEY := "dependencies"
 var loaded_mods: Array[ModData]
 var pending_mods: Array[ModData]
 var ready_mods: Array[ModData]
-
-var dream_translator_api_packed = "res://mods/totobono4-dream_translator_api.zip"
-var french_dream_packed = "res://mods/totobono4-french_dream.zip"
-
-var dream_translator_api_main_path := "res://mods-unpacked/totobono4-dream_translator_api/mod_main.gd"
-var french_dream_main_path := "res://mods-unpacked/totobono4-french_dream/mod_main.gd"
-
-var dream_translator_api_name = "totobono4-dream_translator_api"
-var french_dream_name = "totobono4-french_dream"
-
-var dream_translator_api: Node
-var french_dream: Node
 
 func _init() -> void:
     var game_path := OS.get_executable_path()
