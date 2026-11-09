@@ -31,7 +31,7 @@ func _init() -> void:
 
     if not game_dir_access.dir_exists(mods_dir):
         game_dir_access.make_dir(mods_dir)
-        print(MOD_LOADER_LOG, "t_mods folder created, please add mods in t_mods folder.")
+        print(MOD_LOADER_LOG, MODS_PATH, " folder created, please add mods in ", MODS_PATH, " folder.")
         return
     
     var mods_dir_access = game_dir_access.open(mods_dir)
