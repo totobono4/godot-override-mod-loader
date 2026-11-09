@@ -37,8 +37,6 @@ func _init() -> void:
     var mods_dir_access = game_dir_access.open(mods_dir)
     var mods = mods_dir_access.get_files()
 
-
-
     for mod in mods:
         var mod_data := ModData.new()
         mod_data.packed_path = mods_dir.path_join(mod)
