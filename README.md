@@ -4,4 +4,4 @@ It uses the exact same format from [godot-mod-loader](https://github.com/GodotMo
 I still advice you to use [godot-mod-tool](https://github.com/GodotModding/godot-mod-tool/tree/4.x-dev) to fit the manifest.json and mod_main.gd.
 
 # Installing mods
-Just copy the files `override.cfg and` `override_mod_loader.gd` next to the `game.exe`, put mods in `override_mods` folder (to avoid conflicts with ModLoader.)
+Just copy the files `override.cfg` and `override_mod_loader.gd` next to the `game.exe`, put mods in `override_mods` folder (to avoid conflicts with ModLoader.)
