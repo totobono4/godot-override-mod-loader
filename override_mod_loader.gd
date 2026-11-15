@@ -1,5 +1,9 @@
 extends Node
 
+const MOD_LOADER_LOG := "override_mod_loader:Log: "
+const MOD_LOADER_WARN := "override_mod_loader:Warning: "
+const MOD_LOADER_ERR := "override_mod_loader:Error: "
+
 const OVERRIDE_MODS_PATH := "override_mods"
 const MODS_PATH := "mods"
 
@@ -19,15 +23,22 @@ func _init() -> void:
 	var mods_dir := MODS_PATH
 	var mod_loader_path = game_dir.path_join(MOD_LOADER_ZIP)
 
+	var game_dir_access := DirAccess.open(game_dir)
+	if not game_dir_access.file_exists(mod_loader_path):
+		print(MOD_LOADER_ERR, "ModLoader.zip not found.")
+		return
+
 	var class_name_strs = extract_classes(mod_loader_path)
 	var patched_zip = patch_zip(game_dir, mod_loader_path, class_name_strs)
 
 	if not ProjectSettings.load_resource_pack(patched_zip):
-		print("failed to load patched ModLoader")
+		print(MOD_LOADER_ERR, "Failed to load patched ModLoader.")
 		return
-	print("Patched ModLoader Loaded !")
+	print(MOD_LOADER_LOG, "Patched ModLoader Loaded !")
 
-	var game_dir_access := DirAccess.open(game_dir)
+	if not game_dir_access.dir_exists(override_mods_dir):
+		game_dir_access.make_dir(override_mods_dir)
+		print(MOD_LOADER_LOG, "override_mods folder created.")
 
 	var mods_dir_access = game_dir_access.open(override_mods_dir)
 	var mods = mods_dir_access.get_files()
@@ -36,15 +47,15 @@ func _init() -> void:
 		var patched_mod = patch_zip(mods_dir, override_mods_dir.path_join(mod), class_name_strs)
 
 		if not ProjectSettings.load_resource_pack(patched_mod):
-			print("Failed to load mod ", mod.get_basename())
+			print(MOD_LOADER_WARN, "Failed to load mod ", mod.get_basename())
 			continue
-		print("Mod ", mod.get_basename(), " loaded.")
+		print(MOD_LOADER_LOG, "Mod ", mod.get_basename(), " loaded.")
 
 func extract_classes(zip_path : String) -> Dictionary[String, String]:
 	var reader = ZIPReader.new()
 	var reader_res = reader.open(zip_path)
 	if reader_res != OK:
-		print("error reading " + zip_path)
+		print(MOD_LOADER_ERR, "Error reading " + zip_path)
 		return reader_res
 
 	return collect_class_name_strs(reader)
@@ -54,7 +65,7 @@ func patch_zip(root_dir : String, zip_path : String, class_name_strs : Dictionar
 	var reader = ZIPReader.new()
 	var reader_res = reader.open(zip_path)
 	if reader_res != OK:
-		print("error reading " + zip_path)
+		print(MOD_LOADER_ERR, "Error reading " + zip_path)
 		return reader_res
 
 	var gdscript_const_dependencies = collect_const_dependencies(reader, class_name_strs)
@@ -65,10 +76,10 @@ func patch_zip(root_dir : String, zip_path : String, class_name_strs : Dictionar
 	var writer = ZIPPacker.new()
 	var writer_res = writer.open(patched_zip_path)
 	if writer_res != OK:
-		print("error reading " + patched_zip_path)
+		print(MOD_LOADER_ERR, "Error reading " + patched_zip_path)
 		return writer_res
 
-	print("writing " + patched_zip_path + "..")
+	print(MOD_LOADER_LOG, "Patching ", patched_zip_path, "..")
 
 	var files = reader.get_files()
 
@@ -80,13 +91,6 @@ func patch_zip(root_dir : String, zip_path : String, class_name_strs : Dictionar
 		var file = reader.read_file(file_path)
 
 		if is_gdscript_valid(file_path):
-			#if file_path.contains("options_current.gd"):
-			#	writer.start_file(file_path)
-			#	var patched = patch_file(file, "")
-			#	patched = encode_utf8(reg_sub(decode_utf8(patched), "load", "preload"))
-			#	writer.write_file(patched)
-			#	continue
-
 			writer.start_file(file_path)
 			var const_dependencies = ""
 			if gdscript_const_dependencies.has(file_path):
