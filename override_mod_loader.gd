@@ -1,118 +1,218 @@
 extends Node
 
-const MOD_LOADER_LOG := "override_mod_loader:Log: "
-const MOD_LOADER_WARN := "override_mod_loader:Warning: "
-const MOD_LOADER_ERR := "override_mod_loader:Error: "
+const OVERRIDE_MODS_PATH := "override_mods"
+const MODS_PATH := "mods"
 
-const MODS_PATH := "override_mods"
-const UNPACKED_MODS_PATH := "res://mods-unpacked"
+const MOD_LOADER_ZIP := "ModLoader.zip"
+const PATCHED_PREFIX := "Patched_"
 
-class ModData:
-	var path: String
-	var unpacked_path: String
-	var is_zip: bool
-	var name: String
-	var manifest_path: String
-	var main_path: String
+const CLASS_NAME_REGEX := "class_name (\\w+)"
+const EXTENDS_REGEX := "(extends .*)"
 
-const MOD_MANIFEST_PATH := "manifest.json"
-const MOD_MAIN_PATH := "mod_main.gd"
-
-const MANIFEST_DEPENDENCIES_KEY := "dependencies"
-
-var loaded_mods: Array[ModData]
-var pending_mods: Array[ModData]
-var ready_mods: Array[ModData]
+func CLASS_USE_REGEX(class_name_str) -> String :
+	return "(?<!class_name )\\b" + class_name_str + "\\b"
 
 func _init() -> void:
 	var game_path := OS.get_executable_path()
 	var game_dir := game_path.get_base_dir()
-	var mods_dir := MODS_PATH if not has_editor_feature() else UNPACKED_MODS_PATH
+	var override_mods_dir := OVERRIDE_MODS_PATH
+	var mods_dir := MODS_PATH
+	var mod_loader_path = game_dir.path_join(MOD_LOADER_ZIP)
+
+	var class_name_strs = extract_classes(mod_loader_path)
+	var patched_zip = patch_zip(game_dir, mod_loader_path, class_name_strs)
+
+	if not ProjectSettings.load_resource_pack(patched_zip):
+		print("failed to load patched ModLoader")
+		return
+	print("Patched ModLoader Loaded !")
+
 	var game_dir_access := DirAccess.open(game_dir)
 
-	if not has_editor_feature() and not game_dir_access.dir_exists(mods_dir):
-		game_dir_access.make_dir(mods_dir)
-		print(MOD_LOADER_LOG, MODS_PATH, " folder created, please add mods in ", MODS_PATH, " folder.")
-		return
-	
-	var mods_dir_access = game_dir_access.open(mods_dir)
-	var mods = mods_dir_access.get_files() if not has_editor_feature() else mods_dir_access.get_directories()
+	var mods_dir_access = game_dir_access.open(override_mods_dir)
+	var mods = mods_dir_access.get_files()
 
 	for mod in mods:
-		var mod_data := ModData.new()
-		mod_data.path = mods_dir.path_join(mod)
-		mod_data.unpacked_path = UNPACKED_MODS_PATH.path_join(mod.get_basename())
-		mod_data.is_zip = mod.get_extension() == "zip"
-		mod_data.name = mod.get_basename()
-		mod_data.manifest_path = mod_data.unpacked_path.path_join(MOD_MANIFEST_PATH)
-		mod_data.main_path = mod_data.unpacked_path.path_join(MOD_MAIN_PATH)
+		var patched_mod = patch_zip(mods_dir, override_mods_dir.path_join(mod), class_name_strs)
 
-		if mod_data.is_zip and not ProjectSettings.load_resource_pack(mod_data.path):
-			print(MOD_LOADER_WARN, "Failed to load mod ", mod_data.name)
+		if not ProjectSettings.load_resource_pack(patched_mod):
+			print("Failed to load mod ", mod.get_basename())
 			continue
-		print(MOD_LOADER_LOG, "Mod ", mod_data.name, " loaded.")
+		print("Mod ", mod.get_basename(), " loaded.")
 
-		loaded_mods.push_back(mod_data)
-		pending_mods.push_back(mod_data)
+func extract_classes(zip_path : String) -> Dictionary[String, String]:
+	var reader = ZIPReader.new()
+	var reader_res = reader.open(zip_path)
+	if reader_res != OK:
+		print("error reading " + zip_path)
+		return reader_res
 
-	while not pending_mods.is_empty():
-		var mod_data = pending_mods.pop_front()
-		var manifest_path = mod_data.manifest_path
+	return collect_class_name_strs(reader)
 
-		if not FileAccess.file_exists(manifest_path):
-			print(MOD_LOADER_WARN, mod_data.name, " don't have manifest, failed to init.")
+
+func patch_zip(root_dir : String, zip_path : String, class_name_strs : Dictionary[String, String]):
+	var reader = ZIPReader.new()
+	var reader_res = reader.open(zip_path)
+	if reader_res != OK:
+		print("error reading " + zip_path)
+		return reader_res
+
+	var gdscript_const_dependencies = collect_const_dependencies(reader, class_name_strs)
+
+	var patched_zip = PATCHED_PREFIX + zip_path.get_file()
+	var patched_zip_path = root_dir.path_join(patched_zip)
+
+	var writer = ZIPPacker.new()
+	var writer_res = writer.open(patched_zip_path)
+	if writer_res != OK:
+		print("error reading " + patched_zip_path)
+		return writer_res
+
+	print("writing " + patched_zip_path + "..")
+
+	var files = reader.get_files()
+
+	for file_path in files:
+		if file_path.ends_with("/"):
+			writer.add_directory(file_path)
 			continue
-		
-		var manifest_file = FileAccess.open(manifest_path, FileAccess.READ)
-		var content := manifest_file.get_as_text()
 
-		var json_converter = JSON.new()
-		var res = json_converter.parse(content)
-		if not res == OK:
-			print(MOD_LOADER_WARN, mod_data.name, " manifest is not json, failed to init.")
+		var file = reader.read_file(file_path)
+
+		if is_gdscript_valid(file_path):
+			#if file_path.contains("options_current.gd"):
+			#	writer.start_file(file_path)
+			#	var patched = patch_file(file, "")
+			#	patched = encode_utf8(reg_sub(decode_utf8(patched), "load", "preload"))
+			#	writer.write_file(patched)
+			#	continue
+
+			writer.start_file(file_path)
+			var const_dependencies = ""
+			if gdscript_const_dependencies.has(file_path):
+				const_dependencies = gdscript_const_dependencies.get(file_path)
+			var patched = patch_file(file, const_dependencies)
+			writer.write_file(patched)
+			writer.close_file()
+		elif is_needed_file(file_path):
+			writer.start_file(file_path)
+			writer.write_file(file)
+			writer.close_file()
+	
+	reader.close()
+	writer.close()
+
+	return patched_zip_path
+
+func collect_class_name_strs(reader : ZIPReader):
+	var files = reader.get_files()
+	var class_name_strs : Dictionary[String, String]
+
+	for file_path in files:
+		if not is_gdscript_valid(file_path):
 			continue
 
-		if not json_converter.data is Dictionary:
-			print(MOD_LOADER_WARN, mod_data.name, " manifest is not dictionary, failed to init.")
+		var file = reader.read_file(file_path)
+
+		if not has_class_name_str(file):
 			continue
 
-		var data = json_converter.data
+		class_name_strs.set(get_class_name_str(file), file_path)
+	return class_name_strs
 
-		if not data.has(MANIFEST_DEPENDENCIES_KEY):
-			print(MOD_LOADER_WARN, mod_data.name, " manifest don't have 'decepencies' key.")
-		
-		if data.has(MANIFEST_DEPENDENCIES_KEY):
-			var loaded_mod_names = loaded_mods.map(func(e): return e.name)
-			var launched_mod_names = ready_mods.map(func(e): return e.name)
+func collect_const_dependencies(reader: ZIPReader, class_name_strs : Dictionary[String, String]):
+	var files = reader.get_files()
+	var gdscript_const_dependencies : Dictionary[String, String]
 
-			var missing_dependencies = false
-			var pending_dependencies = false
+	for file_path in files:
+		if not is_gdscript_valid(file_path):
+			continue
 
-			for dependency in data.get(MANIFEST_DEPENDENCIES_KEY):
-				if not loaded_mod_names.has(dependency):
-					missing_dependencies = true
-					print(MOD_LOADER_WARN, mod_data.name, " can't load, missing dependency: ", dependency)
-					continue
-				if not launched_mod_names.has(dependency):
-					pending_dependencies = true
-					continue
+		var file = reader.read_file(file_path)
+		var using_class_name_str = false
+		var const_dependencies = ""
 
-			if missing_dependencies:
+		for class_name_str_key in class_name_strs.keys():
+			if not is_using_class_name_str(file, class_name_str_key):
 				continue
-			if pending_dependencies:
-				pending_mods.push_back(mod_data)
-				continue
 
-		ready_mods.push_back(mod_data)
-		print(MOD_LOADER_LOG, "Mod ", mod_data.name, " ready.")
+			const_dependencies += "const " + class_name_str_key + " := preload(\"res://" + class_name_strs.get(class_name_str_key) + "\")\n"
+			using_class_name_str = true
 
-	for mod in ready_mods:
-		print(MOD_LOADER_LOG, "Launching mod ", mod.name, "..")
+		if not using_class_name_str:
+			continue
 
-		var node = Node.new()
-		node.set_name(mod.name)
-		node.set_script(load(mod.main_path))
-		add_child(node)
+		gdscript_const_dependencies.set(file_path, const_dependencies)
+	
+	return gdscript_const_dependencies
 
-func has_editor_feature() -> bool:
-	return OS.has_feature("editor")
+func patch_file(file : PackedByteArray, const_dependencies : String) -> PackedByteArray:
+	var unclassed_file = file
+	if has_class_name_str(file):
+		unclassed_file = remove_class_name_str(file)
+	var patched = insert_after(unclassed_file, const_dependencies, EXTENDS_REGEX)
+	return patched
+
+func remove_class_name_str(file: PackedByteArray) -> PackedByteArray:
+	return encode_utf8(reg_sub(decode_utf8(file), "", CLASS_NAME_REGEX))
+
+func insert_after(file : PackedByteArray, insert : String, after_reg : String):
+	if has_extends_str(file):
+		var keep = get_extends_str(file) + "\n"
+		return encode_utf8(reg_sub(decode_utf8(file), keep + insert, EXTENDS_REGEX))
+	return encode_utf8(insert + decode_utf8(file))
+
+func has_class_name_str(file : PackedByteArray) -> bool:
+	var result = reg_search(decode_utf8(file), CLASS_NAME_REGEX)
+	if result:
+		return true
+	return false
+
+func get_class_name_str(file : PackedByteArray) -> String:
+	var result = reg_search(decode_utf8(file), CLASS_NAME_REGEX)
+	if result:
+		return result.get_string(1)
+	return ""
+
+func is_using_class_name_str(file : PackedByteArray, class_name_str : String) -> bool:
+	var result = reg_search(decode_utf8(file), CLASS_USE_REGEX(class_name_str))
+	if result:
+		return true
+	return false
+
+func has_extends_str(file : PackedByteArray) -> bool:
+	var result = reg_search(decode_utf8(file), EXTENDS_REGEX)
+	if result:
+		return true
+	return false
+
+func get_extends_str(file : PackedByteArray) -> String:
+	var result = reg_search(decode_utf8(file), EXTENDS_REGEX)
+	if result:
+		return result.get_string(1)
+	return ""
+
+func reg_search(search_str : String, reg_str : String) -> RegExMatch:
+	var regex = RegEx.create_from_string(reg_str)
+	return regex.search(search_str)
+
+func reg_sub(subject_str : String, replacement_str : String, reg_str : String) -> String:
+	var regex = RegEx.create_from_string(reg_str)
+	return regex.sub(subject_str, replacement_str)
+
+func is_gdscript_valid(file_path):
+	var valid = true
+	valid = valid and file_path.get_extension() == "gd"
+	valid = valid and not file_path.contains("setup")
+	return valid
+
+func is_needed_file(file_path):
+	var needed = false
+	needed = true
+	return needed
+
+func decode_utf8(packed_byte_array : PackedByteArray) -> String:
+	return packed_byte_array.get_string_from_utf8()
+
+func encode_utf8(str : String) -> PackedByteArray:
+	return str.to_utf8_buffer()
