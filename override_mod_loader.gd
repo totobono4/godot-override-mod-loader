@@ -4,14 +4,19 @@ const MOD_LOADER_LOG := "override_mod_loader:Log: "
 const MOD_LOADER_WARN := "override_mod_loader:Warning: "
 const MOD_LOADER_ERR := "override_mod_loader:Error: "
 
-const OVERRIDE_MODS_PATH := "override_mods"
 const MODS_PATH := "mods"
 
-const MOD_LOADER_ZIP := "ModLoader.zip"
+const MOD_LOADER_BEGIN := "ModLoader"
 const PATCHED_PREFIX := "Patched_"
 
 const CLASS_NAME_REGEX := "class_name (\\w+)"
 const EXTENDS_REGEX := "(extends .*)"
+
+const CONFIG_PATH := "user://override_mod_loader.cfg"
+const SETTING := "setting"
+const SETTING_PATCHED := "patched"
+const SETTING_MOD_LOADER_CLASS_NAMES := "mod_loader_class_names"
+const SETTING_PATCHED_ZIP := "patched_zip"
 
 func CLASS_USE_REGEX(class_name_str) -> String :
 	return "(?<!class_name )\\b" + class_name_str + "\\b"
@@ -19,37 +24,63 @@ func CLASS_USE_REGEX(class_name_str) -> String :
 func _init() -> void:
 	var game_path := OS.get_executable_path()
 	var game_dir := game_path.get_base_dir()
-	var override_mods_dir := OVERRIDE_MODS_PATH
 	var mods_dir := MODS_PATH
-	var mod_loader_path = game_dir.path_join(MOD_LOADER_ZIP)
 
 	var game_dir_access := DirAccess.open(game_dir)
-	if not game_dir_access.file_exists(mod_loader_path):
-		print(MOD_LOADER_ERR, "ModLoader.zip not found.")
-		return
+	var mod_loader_path := ""
+	var found_mod_loader := false
 
-	var class_name_strs = extract_classes(mod_loader_path)
-	var patched_zip = patch_zip(game_dir, mod_loader_path, class_name_strs)
+	for file in game_dir_access.get_files():
+		if file.begins_with(MOD_LOADER_BEGIN) and file.get_extension() == "zip":
+			mod_loader_path = file
+			found_mod_loader = true
+			break
+
+	var config = ConfigFile.new()
+	var err = config.load(CONFIG_PATH)
+
+	if err == OK and config.get_value("setting", "patched") and not game_dir_access.file_exists(config.get_value("setting", "patched_zip")):
+		config.set_value("setting", "patched", false)
+		config.save(CONFIG_PATH)
+
+	var just_patched_mod_loader := false
+
+	if err != OK or not config.get_value("setting", "patched"):
+		if not found_mod_loader:
+			print(MOD_LOADER_ERR, "ModLoader not found.")
+			return
+
+		just_patched_mod_loader = true
+		config.set_value("setting", "patched", true)
+		config.set_value("setting", "mod_loader_class_names", extract_classes(mod_loader_path))
+		config.set_value("setting", "patched_zip", patch_zip(game_dir, mod_loader_path, config.get_value("setting", "mod_loader_class_names")))
+		config.save(CONFIG_PATH)
+
+	var class_name_strs = config.get_value("setting", "mod_loader_class_names")
+	var patched_zip = config.get_value("setting", "patched_zip")
 
 	if not ProjectSettings.load_resource_pack(patched_zip):
 		print(MOD_LOADER_ERR, "Failed to load patched ModLoader.")
 		return
-	print(MOD_LOADER_LOG, "Patched ModLoader Loaded !")
+	print(MOD_LOADER_LOG, "Patched ModLoader Loaded.")
 
-	if not game_dir_access.dir_exists(override_mods_dir):
-		game_dir_access.make_dir(override_mods_dir)
-		print(MOD_LOADER_LOG, "override_mods folder created.")
+	if just_patched_mod_loader:
+		game_dir_access.remove(mod_loader_path)
 
-	var mods_dir_access = game_dir_access.open(override_mods_dir)
+	var mods_dir_access = game_dir_access.open(mods_dir)
 	var mods = mods_dir_access.get_files()
 
 	for mod in mods:
-		var patched_mod = patch_zip(mods_dir, override_mods_dir.path_join(mod), class_name_strs)
+		if is_patched_zip(mod):
+			continue
+		var patched_mod = patch_zip(mods_dir, mods_dir.path_join(mod), class_name_strs)
 
 		if not ProjectSettings.load_resource_pack(patched_mod):
 			print(MOD_LOADER_WARN, "Failed to load mod ", mod.get_basename())
 			continue
 		print(MOD_LOADER_LOG, "Mod ", mod.get_basename(), " loaded.")
+
+		mods_dir_access.remove(mod)
 
 func extract_classes(zip_path : String) -> Dictionary[String, String]:
 	var reader = ZIPReader.new()
@@ -70,7 +101,7 @@ func patch_zip(root_dir : String, zip_path : String, class_name_strs : Dictionar
 
 	var gdscript_const_dependencies = collect_const_dependencies(reader, class_name_strs)
 
-	var patched_zip = PATCHED_PREFIX + zip_path.get_file()
+	var patched_zip = get_patched_zip(zip_path)
 	var patched_zip_path = root_dir.path_join(patched_zip)
 
 	var writer = ZIPPacker.new()
@@ -220,3 +251,9 @@ func decode_utf8(packed_byte_array : PackedByteArray) -> String:
 
 func encode_utf8(str : String) -> PackedByteArray:
 	return str.to_utf8_buffer()
+
+func get_patched_zip(zip_path) -> String:
+	return PATCHED_PREFIX + zip_path.get_file()
+
+func is_patched_zip(zip_path):
+	return zip_path.begins_with(PATCHED_PREFIX)
