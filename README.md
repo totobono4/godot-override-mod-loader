@@ -4,6 +4,6 @@ Uses [godot-mod-loader](https://github.com/GodotModding/godot-mod-loader/tree/4.
 
 # Installing mods
 Just copy the files `override.cfg` and `override_mod_loader.gd` next to the `game.exe`.
-Download [godot-mod-loader last release](https://github.com/GodotModding/godot-mod-loader/tree/4.x-dev), copy next to `game.exe` and rename it `ModLoader.zip`.
-Create `override_mods` folder next to `game.exe` and put your ModLoader mods in.
+Download [godot-mod-loader last release](https://github.com/GodotModding/godot-mod-loader/tree/4.x-dev) and copy next to `game.exe`.
+Put your mods in `mods` folder.
 Run the game and enjoy your mods without decomp!
