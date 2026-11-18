@@ -39,25 +39,25 @@ func _init() -> void:
 	var config = ConfigFile.new()
 	var err = config.load(CONFIG_PATH)
 
-	if err == OK and config.get_value("setting", "patched") and not game_dir_access.file_exists(config.get_value("setting", "patched_zip")):
-		config.set_value("setting", "patched", false)
+	if err == OK and config.get_value(SETTING, SETTING_PATCHED) and not game_dir_access.file_exists(config.get_value(SETTING, SETTING_PATCHED_ZIP)):
+		config.set_value(SETTING, SETTING_PATCHED, false)
 		config.save(CONFIG_PATH)
 
 	var just_patched_mod_loader := false
 
-	if err != OK or not config.get_value("setting", "patched"):
+	if err != OK or not config.get_value(SETTING, SETTING_PATCHED):
 		if not found_mod_loader:
 			print(MOD_LOADER_ERR, "ModLoader not found.")
 			return
 
 		just_patched_mod_loader = true
-		config.set_value("setting", "patched", true)
-		config.set_value("setting", "mod_loader_class_names", extract_classes(mod_loader_path))
-		config.set_value("setting", "patched_zip", patch_zip(game_dir, mod_loader_path, config.get_value("setting", "mod_loader_class_names")))
+		config.set_value(SETTING, SETTING_PATCHED, true)
+		config.set_value(SETTING, SETTING_MOD_LOADER_CLASS_NAMES, extract_classes(mod_loader_path))
+		config.set_value(SETTING, SETTING_PATCHED_ZIP, patch_zip(game_dir, mod_loader_path, config.get_value(SETTING, SETTING_MOD_LOADER_CLASS_NAMES)))
 		config.save(CONFIG_PATH)
 
-	var class_name_strs = config.get_value("setting", "mod_loader_class_names")
-	var patched_zip = config.get_value("setting", "patched_zip")
+	var class_name_strs = config.get_value(SETTING, SETTING_MOD_LOADER_CLASS_NAMES)
+	var patched_zip = config.get_value(SETTING, SETTING_PATCHED_ZIP)
 
 	if not ProjectSettings.load_resource_pack(patched_zip):
 		print(MOD_LOADER_ERR, "Failed to load patched ModLoader.")
